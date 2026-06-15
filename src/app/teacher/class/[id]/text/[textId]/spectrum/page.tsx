@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft, Loader2, Info, PieChart, Layout, Quote, MessageSquare } from 'lucide-react'
-import { Class, Text, StudentProfile, Annotation, WritingSubmission, EMOTION_CONFIGS } from '@/types/database'
+import { Class, Text, StudentProfile, Annotation, WritingSubmission, GuestSession, EMOTION_CONFIGS } from '@/types/database'
 import SpectrumVisualizer from '@/components/viz/SpectrumVisualizer'
 import StatsDashboard from '@/components/viz/StatsDashboard'
 import { GlassCard } from '@/components/ui/GlassCard'
@@ -16,6 +16,7 @@ export default function SpectrumPage({ params }: { params: Promise<{ id: string,
   const [cls, setCls] = useState<Class | null>(null)
   const [text, setText] = useState<Text | null>(null)
   const [students, setStudents] = useState<StudentProfile[]>([])
+  const [guests, setGuests] = useState<GuestSession[]>([])
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [writingSubmissions, setWritingSubmissions] = useState<WritingSubmission[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,12 +37,13 @@ export default function SpectrumPage({ params }: { params: Promise<{ id: string,
         return
       }
 
-      const [classRes, textRes, enrollRes, annRes, writingRes] = await Promise.all([
+      const [classRes, textRes, enrollRes, annRes, writingRes, guestRes] = await Promise.all([
         supabase.from('classes').select('*').eq('id', classId).single(),
         supabase.from('texts').select('*').eq('id', textId).single(),
         supabase.from('class_enrollments').select('student_profiles(*)').eq('class_id', classId),
         supabase.from('annotations').select('*').eq('text_id', textId),
-        supabase.from('writing_submissions').select('*').eq('text_id', textId)
+        supabase.from('writing_submissions').select('*').eq('text_id', textId),
+        supabase.from('guest_sessions').select('*').eq('class_id', classId).order('created_at', { ascending: true })
       ])
 
       if (classRes.error || textRes.error) {
@@ -55,6 +57,7 @@ export default function SpectrumPage({ params }: { params: Promise<{ id: string,
       setStudents((enrollRes.data || []).map((e: any) => e.student_profiles as StudentProfile).filter(Boolean))
       setAnnotations(annRes.data || [])
       setWritingSubmissions(writingRes.data || [])
+      setGuests(guestRes.data || [])
     } catch (err) {
       console.error(err)
     } finally {
@@ -144,17 +147,18 @@ export default function SpectrumPage({ params }: { params: Promise<{ id: string,
       ) : (
         <div className="animate-in fade-in duration-700">
           {view === 'spectrum' ? (
-            <SpectrumVisualizer 
+            <SpectrumVisualizer
               text={text.content}
               annotations={annotations}
               students={students}
+              guests={guests}
               title={text.title}
             />
           ) : view === 'stats' ? (
-            <StatsDashboard 
+            <StatsDashboard
               text={text.content}
               annotations={annotations}
-              studentCount={students.length}
+              studentCount={students.length + guests.length}
             />
           ) : (
             <div className="grid grid-cols-1 gap-8">

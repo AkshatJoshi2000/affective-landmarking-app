@@ -1,13 +1,14 @@
 'use client'
 
 import React, { useState, useRef, useMemo } from 'react'
-import { EMOTION_CONFIGS, EmotionLabel, Annotation, StudentProfile } from '@/types/database'
+import { EMOTION_CONFIGS, EmotionLabel, Annotation, StudentProfile, GuestSession } from '@/types/database'
 import { GlassCard } from '@/components/ui/GlassCard'
 
 interface SpectrumProps {
   text: string
   annotations: Annotation[]
   students: StudentProfile[]
+  guests?: GuestSession[]
   title?: string
 }
 
@@ -27,7 +28,7 @@ interface TooltipState {
   }
 }
 
-export default function SpectrumVisualizer({ text, annotations, students }: SpectrumProps) {
+export default function SpectrumVisualizer({ text, annotations, students, guests = [] }: SpectrumProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -101,6 +102,8 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
     return segments
   }, [annotations, textLength])
 
+  const totalParticipants = students.length + guests.length
+
   // 2. Calculate Individual Student Segments
   const studentData = useMemo(() => {
     return students.map(student => {
@@ -141,6 +144,37 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
       }
     })
   }, [annotations, students, textLength])
+
+  // 3. Calculate Individual Guest Segments
+  const guestData = useMemo(() => {
+    return guests.map(guest => {
+      const guestAnns = annotations.filter(a => a.guest_id === guest.id)
+
+      const charEmotions = Array.from({ length: textLength }, () => [] as EmotionLabel[])
+      guestAnns.forEach(ann => {
+        for (let i = ann.start_offset; i < ann.end_offset; i++) {
+          if (i < textLength) charEmotions[i].push(ann.rasa_label)
+        }
+      })
+
+      const segments: { start: number, end: number, emotions: EmotionLabel[] }[] = []
+      let currentEmotions: EmotionLabel[] = []
+      let start = 0
+
+      charEmotions.forEach((emotions, i) => {
+        const hash = emotions.slice().sort().join(',')
+        const currentHash = currentEmotions.slice().sort().join(',')
+        if (hash !== currentHash) {
+          if (currentEmotions.length > 0) segments.push({ start, end: i, emotions: [...currentEmotions] })
+          currentEmotions = emotions
+          start = i
+        }
+      })
+      if (currentEmotions.length > 0) segments.push({ start, end: textLength, emotions: [...currentEmotions] })
+
+      return { guest, rawAnnotations: guestAnns, segments }
+    })
+  }, [annotations, guests, textLength])
 
   const handleMouseMove = (e: React.MouseEvent, content: TooltipState['content']) => {
     setTooltip({
@@ -198,7 +232,7 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
                         height={60}
                         fill={EMOTION_CONFIGS[em.label].color}
                         style={{ mixBlendMode: 'multiply' }}
-                        opacity={0.3 + (em.count / students.length) * 0.6}
+                        opacity={0.3 + (em.count / Math.max(totalParticipants, 1)) * 0.6}
                         className="pointer-events-none"
                       />
                     ))}
@@ -215,7 +249,7 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
                         emotions: seg.allEmotions.map(em => ({
                           name: EMOTION_CONFIGS[em.label].name,
                           color: EMOTION_CONFIGS[em.label].color,
-                          agreement: `${em.count}/${students.length} students`
+                          agreement: `${em.count}/${totalParticipants} participants`
                         })),
                         passage: text.substring(seg.start, seg.end)
                       })}
@@ -249,16 +283,16 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
       {/* 2. Individual Spectrum */}
       <GlassCard className="p-10 shadow-lg border-white/40 overflow-hidden relative bg-white/40">
         <h3 className="text-3xl text-charcoal mb-12 font-normal flex items-center justify-between">
-          Student Spectrum
+          Individual Spectrum
           <span className="text-[10px] font-bold text-warm-grey/40 tracking-[0.2em] uppercase">Individual Journeys</span>
         </h3>
 
         <div className="relative overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-charcoal/10 scrollbar-track-transparent">
           <div style={{ minWidth: LABEL_WIDTH + textLength + MARGIN_RIGHT }}>
-            <svg 
-              width={LABEL_WIDTH + textLength + MARGIN_RIGHT} 
-              height={students.length * (BAND_HEIGHT + BAND_GAP) + 60} 
-              viewBox={`0 0 ${LABEL_WIDTH + textLength + MARGIN_RIGHT} ${students.length * (BAND_HEIGHT + BAND_GAP) + 60}`}
+            <svg
+              width={LABEL_WIDTH + textLength + MARGIN_RIGHT}
+              height={totalParticipants * (BAND_HEIGHT + BAND_GAP) + 60}
+              viewBox={`0 0 ${LABEL_WIDTH + textLength + MARGIN_RIGHT} ${totalParticipants * (BAND_HEIGHT + BAND_GAP) + 60}`}
               className="w-full"
             >
               {studentData.map(({ student, rawAnnotations, segments }, sIdx) => {
@@ -276,17 +310,16 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
                       {student.first_name} {student.last_name}
                     </text>
 
-                    <rect 
-                      x={LABEL_WIDTH} 
-                      y={0} 
-                      width={textLength} 
-                      height={BAND_HEIGHT} 
+                    <rect
+                      x={LABEL_WIDTH}
+                      y={0}
+                      width={textLength}
+                      height={BAND_HEIGHT}
                       fill="#FDFBF7"
                       className="opacity-50"
                     />
 
                     <g transform={`translate(${LABEL_WIDTH}, 0)`}>
-                      {/* Visual layers (multiply blend) */}
                       {rawAnnotations.map((ann) => (
                         <rect
                           key={ann.id}
@@ -299,8 +332,6 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
                           className="opacity-80 pointer-events-none"
                         />
                       ))}
-                      
-                      {/* Hover hitboxes */}
                       {segments.map((seg, idx) => (
                         <rect
                           key={`hover-${idx}`}
@@ -326,15 +357,90 @@ export default function SpectrumVisualizer({ text, annotations, students }: Spec
                 )
               })}
 
-              <g transform={`translate(${LABEL_WIDTH}, ${students.length * (BAND_HEIGHT + BAND_GAP) + 30})`}>
-                <line 
-                  x1={0} y1={0} x2={textLength} y2={0} 
-                  stroke="#2A2622" strokeWidth={1} strokeDasharray="4 4" 
+              {/* Guest bands — dashed outline to distinguish from enrolled students */}
+              {guestData.map(({ guest, rawAnnotations, segments }, gIdx) => {
+                const y = (students.length + gIdx) * (BAND_HEIGHT + BAND_GAP)
+
+                return (
+                  <g key={guest.id} transform={`translate(0, ${y})`}>
+                    <text
+                      x={LABEL_WIDTH - 20}
+                      y={BAND_HEIGHT / 2}
+                      textAnchor="end"
+                      alignmentBaseline="middle"
+                      className="fill-warm-grey/70 font-bold text-sm uppercase tracking-wider font-sans"
+                    >
+                      {guest.display_name}
+                    </text>
+                    <text
+                      x={LABEL_WIDTH - 20}
+                      y={BAND_HEIGHT / 2 + 14}
+                      textAnchor="end"
+                      alignmentBaseline="middle"
+                      className="fill-warm-grey/40 text-[9px] uppercase tracking-widest font-sans"
+                    >
+                      guest
+                    </text>
+
+                    <rect
+                      x={LABEL_WIDTH}
+                      y={0}
+                      width={textLength}
+                      height={BAND_HEIGHT}
+                      fill="#FDFBF7"
+                      strokeDasharray="4 4"
+                      stroke="#9E9890"
+                      strokeWidth={1}
+                      className="opacity-30"
+                    />
+
+                    <g transform={`translate(${LABEL_WIDTH}, 0)`}>
+                      {rawAnnotations.map((ann) => (
+                        <rect
+                          key={ann.id}
+                          x={ann.start_offset}
+                          y={0}
+                          width={ann.end_offset - ann.start_offset}
+                          height={BAND_HEIGHT}
+                          fill={EMOTION_CONFIGS[ann.rasa_label].color}
+                          style={{ mixBlendMode: 'multiply' }}
+                          className="opacity-60 pointer-events-none"
+                        />
+                      ))}
+                      {segments.map((seg, idx) => (
+                        <rect
+                          key={`ghover-${idx}`}
+                          x={seg.start}
+                          y={0}
+                          width={seg.end - seg.start}
+                          height={BAND_HEIGHT}
+                          fill="transparent"
+                          className="cursor-crosshair"
+                          onMouseMove={(e) => handleMouseMove(e, {
+                            studentName: `${guest.display_name} (guest)`,
+                            emotions: seg.emotions.map(label => ({
+                              name: EMOTION_CONFIGS[label].name,
+                              color: EMOTION_CONFIGS[label].color
+                            })),
+                            passage: text.substring(seg.start, seg.end)
+                          })}
+                          onMouseLeave={() => setTooltip(null)}
+                        />
+                      ))}
+                    </g>
+                  </g>
+                )
+              })}
+
+              <g transform={`translate(${LABEL_WIDTH}, ${totalParticipants * (BAND_HEIGHT + BAND_GAP) + 30})`}>
+                <line
+                  x1={0} y1={0} x2={textLength} y2={0}
+                  stroke="#2A2622" strokeWidth={1} strokeDasharray="4 4"
                 />
                 <path d={`M ${textLength - 10} -5 L ${textLength} 0 L ${textLength - 10} 5`} fill="none" stroke="#2A2622" strokeWidth={1} />
-                <text 
-                  x={textLength / 2} y={20} 
-                  textAnchor="middle" 
+                <text
+                  x={textLength / 2} y={20}
+                  textAnchor="middle"
                   className="fill-warm-grey text-[10px] font-bold uppercase tracking-[0.3em]"
                 >
                   Progress
