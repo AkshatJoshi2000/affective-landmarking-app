@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft, Loader2, Users, PieChart, Layout } from 'lucide-react'
-import { Text, Annotation, StudentProfile } from '@/types/database'
+import { Text, Annotation, StudentProfile, GuestSession } from '@/types/database'
 import SpectrumVisualizer from '@/components/viz/SpectrumVisualizer'
 import StatsDashboard from '@/components/viz/StatsDashboard'
 import { cn } from '@/lib/utils'
@@ -15,30 +15,31 @@ export default function StudentSpectrumPage({ params }: { params: Promise<{ text
   const [text, setText] = useState<Text | null>(null)
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [students, setStudents] = useState<StudentProfile[]>([])
+  const [guests, setGuests] = useState<GuestSession[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'spectrum' | 'stats'>('spectrum')
 
   const fetchData = useCallback(async () => {
     try {
-      // 1. Fetch text
       const { data: textData } = await supabase
         .from('texts')
         .select('*')
         .eq('id', textId)
         .single()
-      
+
       if (!textData) return
 
-      // 2. Fetch all annotations and enrolled student profiles for this class
-      const [annRes, enrollRes] = await Promise.all([
+      const [annRes, enrollRes, guestRes] = await Promise.all([
         supabase.from('annotations').select('*').eq('text_id', textId),
-        supabase.from('class_enrollments').select('student_profiles(*)').eq('class_id', textData.class_id)
+        supabase.from('class_enrollments').select('student_profiles(*)').eq('class_id', textData.class_id),
+        supabase.from('guest_sessions').select('*').eq('class_id', textData.class_id).order('created_at', { ascending: true })
       ])
 
       setText(textData)
       setAnnotations(annRes.data || [])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setStudents((enrollRes.data || []).map((e: any) => e.student_profiles as StudentProfile).filter(Boolean))
+      setGuests(guestRes.data || [])
     } catch (err) {
       console.error(err)
     } finally {
@@ -107,16 +108,17 @@ export default function StudentSpectrumPage({ params }: { params: Promise<{ text
 
         <div className="animate-in fade-in duration-700">
           {view === 'spectrum' ? (
-            <SpectrumVisualizer 
+            <SpectrumVisualizer
               text={text.content}
               annotations={annotations}
               students={students}
+              guests={guests}
             />
           ) : (
-            <StatsDashboard 
+            <StatsDashboard
               text={text.content}
               annotations={annotations}
-              studentCount={students.length}
+              studentCount={students.length + guests.length}
             />
           )}
         </div>

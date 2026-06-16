@@ -1,8 +1,7 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, use } from 'react'
+import React, { useState, useEffect, use } from 'react'
 import { supabase } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, BarChart2, ArrowRight, BookOpen } from 'lucide-react'
 import { Text } from '@/types/database'
@@ -13,18 +12,23 @@ import { Orb } from '@/components/ui/Orb'
 export default function SubmissionSuccessPage({ params }: { params: Promise<{ textId: string }> }) {
   const { textId } = use(params)
   const [text, setText] = useState<Text | null>(null)
-  const [studentId, setStudentId] = useState<string | null>(null)
-  const router = useRouter()
+  const [isGuest, setIsGuest] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (user) setStudentId(user.id)
+      if (!user) {
+        // Check if this is a guest session
+        const res = await fetch('/api/guest/me')
+        if (res.ok) setIsGuest(true)
+      }
       const { data } = await supabase.from('texts').select('*').eq('id', textId).single()
       if (data) setText(data)
     }
     fetchData()
   }, [textId])
+
+  const dashboardHref = isGuest ? `/guest/${text?.class_id ?? ''}` : '/student/dashboard'
 
   return (
     <div className="min-h-screen atmospheric-bg flex items-center justify-center p-6">
@@ -44,23 +48,23 @@ export default function SubmissionSuccessPage({ params }: { params: Promise<{ te
         <div className="bg-terracotta/5 border border-terracotta/10 p-8 rounded-3xl space-y-4">
           <Orb size="xs" className="mx-auto opacity-60" />
           <p className="text-charcoal/70 text-sm leading-relaxed">
-            By sharing your feelings, you&apos;ve contributed to the class collective. 
+            By sharing your feelings, you&apos;ve contributed to the class collective.
             You now have access to the Consolidated Spectrum.
           </p>
         </div>
 
         <div className="flex flex-col gap-4">
-          <Link href={`/annotate/${textId}/spectrum?student=${studentId}`} className="w-full">
+          <Link href={`/annotate/${textId}/spectrum`} className="w-full">
             <PillButton className="w-full py-5 text-xl flex items-center justify-center gap-3">
               <BarChart2 className="w-6 h-6" />
               View Class Spectrum
               <ArrowRight className="w-6 h-6" />
             </PillButton>
           </Link>
-          
-          <Link href="/student/dashboard" className="text-warm-grey hover:text-charcoal transition-colors text-sm font-medium flex items-center justify-center gap-2">
+
+          <Link href={dashboardHref} className="text-warm-grey hover:text-charcoal transition-colors text-sm font-medium flex items-center justify-center gap-2">
             <BookOpen className="w-4 h-4" />
-            Return to Dashboard
+            {isGuest ? 'Return to Class' : 'Return to Dashboard'}
           </Link>
         </div>
       </GlassCard>
